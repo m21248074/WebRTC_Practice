@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8"/>
+        <title>視訊</title>
+        <style>
+            video
+            {
+                width: 300px;
+                height: 200px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="videos">
+            <video id="myvideo" autoplay playsinline></video>
+        </div>
+
+        <script>
+            const url=new URL(window.location.href);
+            let username=url.searchParams.get('username');
+            if(username==null)
+            {
+                username=prompt("請輸入使用者名稱");
+                window.location.href=window.location.protocol+"//"+window.location.host+`?username=${username}`;
+            }
+
+            let video=document.getElementById("myvideo");
+            let videos=document.getElementById("videos");
+
+            let peerList={};
+            let localStream;
+            let constraints = {audio: false, video: true};
+            let offerOption={offerToReceiveAudio: 0,offerToReceiveVideo: 1};
+
+            let ws=new WebSocket(`wss://${window.location.host}`);
+            ws.onmessage=(e)=>
+            {
+                let json=JSON.parse(e.data);
+                switch(json.type)
+                {
+                    case "join":
+                        console.log(json);
+                        if(json.userList.length>1)
+                        {
+                            json.userList.forEach((user)=>
+                            {
+                                let arr=[username,user];
+                                let connectionStr=arr.sort().join("<->");
+                                if(!peerList[connectionStr]&&user!=username)
+                                {
+                                    let configuration=
+                                    {
+                                        iceServers:
+                                        [
+                                            {
+                                                url: "stun:stun.l.google.com:19302"
+                                            }
+                                        ]//,
+                                        //sdpSemantics: "plan-b"
+                                    };
+                                    let peer=new RTCPeerConnection(configuration);
+                                    localStream.getTracks().forEach((track)=>
+                                    {
+                                        peer.addTrack(track,localStream);
+                                    });
+                                    peer.onicecandidate=(e)=>
+                                    {
+                                        if(e.candidate)
+                                        {
+                                            ws.send(JSON.stringify(
+                                                {
+                                                    type: "ice_candidate",
+                                                    candidate: e.candidate,
+                                                    connectionStr: connectionStr
+                                                }));
+                                        }
+                                    }
+                                    peer.ontrack=(e)=>
+                                    {
+                                        let remoteVideo=document.createElement("video");
+                                        remoteVideo.setAttribute("autoplay","true");
+                                        remoteVideo.setAttribute("playsinline","true");
+                                        remoteVideo.id=connectionStr;
+                                        remoteVideo.srcObject=e.streams[0];
+                                        videos.appendChild(remoteVideo);
+                                    }
+                                    peerList[connectionStr]=peer;
+                                }
+                            });
+                            if(json.username==username) //if this client not first join
+                            {
+                                console.log("broadcase offer");
+                                for(let connectionStr in peerList)
+                                {
+                                    peerList[connectionStr].createOffer(offerOption)
+                                        .then((desc)=>
+                                        {
+                                            peerList[connectionStr].setLocalDescription(desc,()=>
+                                            {
+                                                ws.send(JSON.stringify(
+                                                    {
+                                                        type: "offer",
+                                                        SDP: peerList[connectionStr].localDescription,
+                                                        connectionStr: connectionStr
+                                                    }));
+                                            })
+                                        })
+                                    console.log(peerList[connectionStr].signalingState);
+                                }
+                            }
+                        }
+                        break;
+                    case "ice_candidate":
+                        if(json.candidate && peerList[json.connectionStr])
+                            peerList[json.connectionStr].addIceCandidate(json.candidate);
+                        break;
+                    case "offer":
+                        console.log(json);
+                        if(peerList[json.connectionStr])
+                        {
+                            peerList[json.connectionStr].setRemoteDescription(json.SDP)
+                                .then(()=>
+                                {
+                                    peerList[json.connectionStr].createAnswer()
+                                        .then((desc)=>
+                                        {
+                                            peerList[json.connectionStr].setLocalDescription(desc)
+                                                .then(()=>
+                                                {
+                                                    ws.send(JSON.stringify(
+                                                        {
+                                                            type: 'answer',
+                                                            SDP: peerList[json.connectionStr].localDescription,
+                                                            connectionStr: json.connectionStr
+                                                        }))
+                                                })
+                                        })
+                                })
+                        }
+                        break;
+                    case "answer":
+                        console.log(json);
+                        if(peerList[json.connectionStr])
+                            peerList[json.connectionStr].setRemoteDescription(json.SDP);
+                        break;
+                    case "disconnect":
+                        console.log(json);
+                        let arr=[username,json.username];
+                        let connectionStr=arr.sort().join("<->");
+                        let removeVideo=document.getElementById(`${connectionStr}`);
+                        delete peerList[connectionStr];
+                        if(removeVideo)
+                            removeVideo.remove();
+                        break;
+                }
+            }
+
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then((stream)=>
+                {
+                    localStream=stream;
+                    video.srcObject=stream;
+                    ws.send(JSON.stringify({
+                        type: "join",
+                        username: username
+                    }));
+                })
+        </script>
+    </body>
+</html>
