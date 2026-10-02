@@ -1,191 +1,212 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <meta charset="utf-8"/>
-        <title>視訊</title>
-        <style>
-            video
-            {
-                width: 300px;
-                height: 200px;
-            }
-        </style>
-    </head>
-    <body>
-        <button id="shareBtn" style="display:none">分享桌面</button>
-        <div id="videos">
-            <video id="myvideo" autoplay playsinline></video>
-        </div>
 
-        <script>
-            const url=new URL(window.location.href);
-            let username=url.searchParams.get('username');
-            if(username==null)
-            {
-                username=prompt("請輸入使用者名稱");
-                window.location.href=window.location.protocol+"//"+window.location.host+`?username=${username}`;
-            }
+<head>
+    <meta charset="utf-8" />
+    <title>視訊</title>
+    <style>
+        video {
+            width: 300px;
+            height: 200px;
+        }
+    </style>
+</head>
 
-            let video=document.getElementById("myvideo");
-            let videos=document.getElementById("videos");
-            let shareBtn=document.getElementById("shareBtn");
+<body>
+    <button id="shareBtn" style="display:none">分享桌面</button>
+    <div id="videos">
+        <video id="myvideo" autoplay playsinline></video>
+    </div>
 
-            let peerList={};
-            let localStream;
-            let constraints = {audio: false, video: true};
-            let offerOption={offerToReceiveAudio: 0,offerToReceiveVideo: 1};
+    <script>
+        const url = new URL(window.location.href);
+        let username = url.searchParams.get('username');
+        if (username == null) {
+            username = prompt("請輸入使用者名稱");
+            if (!username) //按取消或留空時給一個隨機名稱
+                username = "user" + Math.floor(Math.random() * 10000);
+            window.location.href = window.location.protocol + "//" + window.location.host + `?username=${encodeURIComponent(username)}`;
+        }
 
-            let ws=new WebSocket(`wss://${window.location.host}`);
-            ws.onmessage=(e)=>
-            {
-                let json=JSON.parse(e.data);
-                switch(json.type)
-                {
-                    case "join":
-                        console.log(json);
-                        if(json.userList.length>1)
-                        {
-                            json.userList.forEach((user)=>
-                            {
-                                let arr=[username,user];
-                                let connectionStr=arr.sort().join("<->");
-                                if(!peerList[connectionStr]&&user!=username)
+        let video = document.getElementById("myvideo");
+        let videos = document.getElementById("videos");
+        let shareBtn = document.getElementById("shareBtn");
+
+        let peerList = {};
+        let pendingCandidates = {}; //remote description 尚未設定前先暫存的 ICE candidate
+        let localStream;
+        let constraints = { audio: false, video: true };
+        let offerOption = { offerToReceiveAudio: 0, offerToReceiveVideo: 1 };
+
+        let ws = new WebSocket(`wss://${window.location.host}`);
+        ws.onmessage = (e) => {
+            let json = JSON.parse(e.data);
+            switch (json.type) {
+                case "join":
+                    console.log(json);
+                    if (json.userList.length > 1) {
+                        json.userList.forEach((user) => {
+                            let arr = [username, user];
+                            let connectionStr = arr.sort().join("<->");
+                            if (!peerList[connectionStr] && user != username) {
+                                let configuration =
                                 {
-                                    let configuration=
-                                    {
-                                        iceServers:
+                                    iceServers:
                                         [
                                             {
                                                 urls: "stun:stun.l.google.com:19302"
                                             }
                                         ]//,
-                                        //sdpSemantics: "plan-b"
-                                    };
-                                    let peer=new RTCPeerConnection(configuration);
-                                    localStream.getTracks().forEach((track)=>
-                                    {
-                                        peer.addTrack(track,localStream);
-                                    });
-                                    peer.onicecandidate=(e)=>
-                                    {
-                                        if(e.candidate)
-                                        {
-                                            ws.send(JSON.stringify(
-                                                {
-                                                    type: "ice_candidate",
-                                                    candidate: e.candidate,
-                                                    connectionStr: connectionStr
-                                                }));
-                                        }
+                                    //sdpSemantics: "plan-b"
+                                };
+                                let peer = new RTCPeerConnection(configuration);
+                                localStream.getTracks().forEach((track) => {
+                                    peer.addTrack(track, localStream);
+                                });
+                                peer.onicecandidate = (e) => {
+                                    if (e.candidate) {
+                                        ws.send(JSON.stringify(
+                                            {
+                                                type: "ice_candidate",
+                                                candidate: e.candidate,
+                                                connectionStr: connectionStr
+                                            }));
                                     }
-                                    peer.ontrack=(e)=>
+                                }
+                                peer.ontrack = (e) => {
+                                    let remoteVideo = document.getElementById(connectionStr);
+                                    if (!remoteVideo) //同一個連線可能觸發多次 ontrack，避免重複建立
                                     {
-                                        let remoteVideo=document.createElement("video");
-                                        remoteVideo.setAttribute("autoplay","true");
-                                        remoteVideo.setAttribute("playsinline","true");
-                                        remoteVideo.id=connectionStr;
-                                        remoteVideo.srcObject=e.streams[0];
+                                        remoteVideo = document.createElement("video");
+                                        remoteVideo.setAttribute("autoplay", "true");
+                                        remoteVideo.setAttribute("playsinline", "true");
+                                        remoteVideo.id = connectionStr;
                                         videos.appendChild(remoteVideo);
                                     }
-                                    peerList[connectionStr]=peer;
+                                    remoteVideo.srcObject = e.streams[0];
                                 }
-                            });
-                            if(json.username==username) //if this client not first join
-                            {
-                                console.log("broadcase offer");
-                                for(let connectionStr in peerList)
-                                {
-                                    peerList[connectionStr].createOffer(offerOption)
-                                        .then((desc)=>
-                                        {
-                                            peerList[connectionStr].setLocalDescription(desc,()=>
-                                            {
-                                                ws.send(JSON.stringify(
-                                                    {
-                                                        type: "offer",
-                                                        SDP: peerList[connectionStr].localDescription,
-                                                        connectionStr: connectionStr
-                                                    }));
-                                            })
+                                peerList[connectionStr] = peer;
+                            }
+                        });
+                        if (json.username == username) //if this client not first join
+                        {
+                            console.log("broadcase offer");
+                            for (let connectionStr in peerList) {
+                                peerList[connectionStr].createOffer(offerOption)
+                                    .then((desc) => {
+                                        peerList[connectionStr].setLocalDescription(desc, () => {
+                                            ws.send(JSON.stringify(
+                                                {
+                                                    type: "offer",
+                                                    SDP: peerList[connectionStr].localDescription,
+                                                    connectionStr: connectionStr
+                                                }));
                                         })
-                                    console.log(peerList[connectionStr].signalingState);
-                                }
+                                    })
+                                console.log(peerList[connectionStr].signalingState);
                             }
                         }
-                        break;
-                    case "ice_candidate":
-                        if(json.candidate && peerList[json.connectionStr])
+                    }
+                    break;
+                case "ice_candidate":
+                    if (json.candidate && peerList[json.connectionStr]) {
+                        if (peerList[json.connectionStr].remoteDescription)
                             peerList[json.connectionStr].addIceCandidate(json.candidate);
-                        break;
-                    case "offer":
-                        console.log(json);
-                        if(peerList[json.connectionStr])
-                        {
-                            peerList[json.connectionStr].setRemoteDescription(json.SDP)
-                                .then(()=>
-                                {
-                                    peerList[json.connectionStr].createAnswer()
-                                        .then((desc)=>
-                                        {
-                                            peerList[json.connectionStr].setLocalDescription(desc)
-                                                .then(()=>
-                                                {
-                                                    ws.send(JSON.stringify(
-                                                        {
-                                                            type: 'answer',
-                                                            SDP: peerList[json.connectionStr].localDescription,
-                                                            connectionStr: json.connectionStr
-                                                        }))
-                                                })
-                                        })
-                                })
+                        else {
+                            pendingCandidates[json.connectionStr] = pendingCandidates[json.connectionStr] || [];
+                            pendingCandidates[json.connectionStr].push(json.candidate);
                         }
-                        break;
-                    case "answer":
+                    }
+                    break;
+                case "offer":
+                    console.log(json);
+                    if (peerList[json.connectionStr]) {
+                        peerList[json.connectionStr].setRemoteDescription(json.SDP)
+                            .then(() => {
+                                flushCandidates(json.connectionStr);
+                                peerList[json.connectionStr].createAnswer()
+                                    .then((desc) => {
+                                        peerList[json.connectionStr].setLocalDescription(desc)
+                                            .then(() => {
+                                                ws.send(JSON.stringify(
+                                                    {
+                                                        type: 'answer',
+                                                        SDP: peerList[json.connectionStr].localDescription,
+                                                        connectionStr: json.connectionStr
+                                                    }))
+                                            })
+                                    })
+                            })
+                    }
+                    break;
+                case "answer":
+                    console.log(json);
+                    if (peerList[json.connectionStr]) {
+                        peerList[json.connectionStr].setRemoteDescription(json.SDP)
+                            .then(() => flushCandidates(json.connectionStr));
+                    }
+                    break;
+                case "disconnect":
+                    {
                         console.log(json);
-                        if(peerList[json.connectionStr])
-                            peerList[json.connectionStr].setRemoteDescription(json.SDP);
-                        break;
-                    case "disconnect":
-                        console.log(json);
-                        let arr=[username,json.username];
-                        let connectionStr=arr.sort().join("<->");
-                        let removeVideo=document.getElementById(`${connectionStr}`);
-                        if(peerList[connectionStr])
+                        let arr = [username, json.username];
+                        let connectionStr = arr.sort().join("<->");
+                        let removeVideo = document.getElementById(`${connectionStr}`);
+                        if (peerList[connectionStr])
                             peerList[connectionStr].close();
                         delete peerList[connectionStr];
-                        if(removeVideo)
+                        delete pendingCandidates[connectionStr];
+                        if (removeVideo)
                             removeVideo.remove();
                         break;
-                }
+                    }
             }
+        }
 
-            function startWith(stream)
-            {
-                localStream=stream;
-                video.srcObject=stream;
-                shareBtn.style.display="none";
-                ws.send(JSON.stringify({
-                    type: "join",
-                    username: username
-                }));
-            }
+        function flushCandidates(connectionStr) {
+            (pendingCandidates[connectionStr] || []).forEach((candidate) => {
+                peerList[connectionStr].addIceCandidate(candidate);
+            });
+            delete pendingCandidates[connectionStr];
+        }
 
-            // getDisplayMedia 必須由使用者點擊觸發，所以攝影機失敗時改用按鈕
-            shareBtn.onclick=()=>
-            {
-                navigator.mediaDevices.getDisplayMedia({video: true})
-                    .then(startWith)
-                    .catch((err)=>alert("無法分享桌面："+err.name));
-            };
+        function startWith(stream) {
+            localStream = stream;
+            video.srcObject = stream;
+            shareBtn.style.display = "none";
 
-            navigator.mediaDevices.getUserMedia(constraints)
+            // 使用者按下瀏覽器的「停止共用」或攝影機被拔除時，離開房間讓其他人移除畫面
+            stream.getTracks().forEach((track) => {
+                track.onended = () => {
+                    ws.close();
+                    alert("視訊來源已停止，已離開房間。請重新整理頁面以重新加入。");
+                };
+            });
+
+            let sendJoin = () => ws.send(JSON.stringify({
+                type: "join",
+                username: username
+            }));
+            if (ws.readyState == WebSocket.OPEN)
+                sendJoin();
+            else
+                ws.addEventListener("open", sendJoin, { once: true }); //WebSocket 尚未連線完成時等待
+        }
+
+        // getDisplayMedia 必須由使用者點擊觸發，所以攝影機失敗時改用按鈕
+        shareBtn.onclick = () => {
+            navigator.mediaDevices.getDisplayMedia({ video: true })
                 .then(startWith)
-                .catch((err)=>
-                {
-                    console.warn("無法使用攝影機，改用桌面分享",err);
-                    shareBtn.style.display="inline-block";
-                });
-        </script>
-    </body>
+                .catch((err) => alert("無法分享桌面：" + err.name));
+        };
+
+        navigator.mediaDevices.getUserMedia(constraints)
+            .then(startWith)
+            .catch((err) => {
+                console.warn("無法使用攝影機，改用桌面分享", err);
+                shareBtn.style.display = "inline-block";
+            });
+    </script>
+</body>
+
 </html>
