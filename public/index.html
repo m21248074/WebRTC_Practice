@@ -151,6 +151,8 @@
                         let arr=[username,json.username];
                         let connectionStr=arr.sort().join("<->");
                         let removeVideo=document.getElementById(`${connectionStr}`);
+                        if(peerList[connectionStr])
+                            peerList[connectionStr].close();
                         delete peerList[connectionStr];
                         if(removeVideo)
                             removeVideo.remove();

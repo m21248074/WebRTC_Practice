@@ -37,11 +37,10 @@ WebRTC 多人視訊練習專案：Node.js 伺服器（Express + `ws`）同時負
 2. 收到 `join`：對 `userList` 中每位尚未建立連線的其他使用者建立 `RTCPeerConnection`，存入 `peerList[connectionStr]`。`connectionStr` 是雙方 username 排序後以 `<->` 串接，兩端算出來的值相同，作為連線的共同識別碼，同時也是遠端 `<video>` 元素的 `id`。
 3. 只有**剛加入者本人**（`json.username==username`）收到自己的 `join` 回播時，才對所有 peer 發出 offer；既有成員只建立 peer 並等待 offer。
 4. `offer` → `answer` → `ice_candidate` 皆帶 `connectionStr`，不屬於自己的連線（`peerList` 中找不到）會被忽略。
-5. `disconnect`：刪除對應 peer 並移除該 `<video>`（目前未呼叫 `peer.close()`）。
+5. `disconnect`：對應 peer 呼叫 `close()` 後刪除，並移除該 `<video>`。
 
 ### 注意事項
 
 - username 必須唯一；整個流程（`connectionStr`、伺服器的 `filter`）都以 username 當作身分識別。
 - ICE 設定使用 Google 公開 STUN，沒有 TURN，跨 NAT 嚴格網路可能無法連線。
 - 使用 `ws` 8、Express 5。`ws` 8 的 `message` 事件收到的是 Buffer，轉發前必須 `toString()`，否則瀏覽器會收到 Blob 而無法 `JSON.parse`。
-- 伺服器端未處理 JSON 解析錯誤。

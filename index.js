@@ -40,7 +40,16 @@ wss.on('connection',(ws,req)=>{
     ws.on("message",(data)=>
     {
         data=data.toString(); //ws 8 以上收到的是 Buffer，轉回字串才會以文字格式轉發
-        let myjson=JSON.parse(data);
+        let myjson;
+        try
+        {
+            myjson=JSON.parse(data);
+        }
+        catch(err)
+        {
+            console.warn("忽略無法解析的訊息:",err.message);
+            return;
+        }
         if(myjson.type=="join")
         {
             let username=myjson.username;
