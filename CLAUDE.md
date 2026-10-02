@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案概述
 
-WebRTC 多人視訊練習專案：Node.js 伺服器（Express + `ws`）同時負責提供靜態網頁與 WebSocket 信令（signaling），瀏覽器端以 mesh 方式（每兩位使用者之間各建一條 `RTCPeerConnection`）互相傳送視訊。僅有兩個原始碼檔案：[index.js](index.js)（伺服器）與 [public/index.html](public/index.html)（前端，含全部內嵌 JS）。
+WebRTC 多人視訊練習專案：Node.js 伺服器（Express + `ws`）同時負責提供靜態網頁與 WebSocket 信令（signaling），瀏覽器端以 mesh 方式（每兩位使用者之間各建一條 `RTCPeerConnection`）互相傳送視訊。伺服器為 [index.js](index.js)；前端在 [public/](public/)，以原生 ES modules 組成（無 build 步驟）：
+
+- [public/main.js](public/main.js)：username、WebSocket、訊息分派（`handlers`）、`join` 流程
+- [public/peers.js](public/peers.js)：`RTCPeerConnection` 管理（offer／answer、ICE 暫存、遠端 `<video>` 的建立與移除），`peerList` 等狀態只存在此模組內
+- [public/media.js](public/media.js)：取得攝影機／桌面分享，監聽視訊來源停止
+- [public/index.html](public/index.html)：只含 HTML 與 CSS，以 `<script type="module">` 載入 `main.js`
 
 ## 常用指令
 
@@ -23,7 +28,7 @@ WebRTC 多人視訊練習專案：Node.js 伺服器（Express + `ws`）同時負
 
 ## 架構
 
-### 信令流程（需同時對照 index.js 與 index.html 才能理解）
+### 信令流程（需同時對照 index.js 與 public/main.js、public/peers.js 才能理解）
 
 伺服器是一個極簡的單一房間中繼，沒有房間概念：
 
@@ -34,9 +39,9 @@ WebRTC 多人視訊練習專案：Node.js 伺服器（Express + `ws`）同時負
 前端流程：
 
 1. `getUserMedia`（僅視訊，`audio: false`）成功後才送出 `join`。若失敗（例如沒有攝影機），會顯示「分享桌面」按鈕，點擊後改用 `getDisplayMedia`（必須由使用者點擊觸發）取得串流再送出 `join`。
-2. 收到 `join`：對 `userList` 中每位尚未建立連線的其他使用者建立 `RTCPeerConnection`，存入 `peerList[connectionStr]`。`connectionStr` 是雙方 username 排序後以 `<->` 串接，兩端算出來的值相同，作為連線的共同識別碼，同時也是遠端 `<video>` 元素的 `id`。
+2. 收到 `join`：對 `userList` 中每位尚未建立連線的其他使用者建立 `RTCPeerConnection`，存入 `peers.js` 的 `peerList[connectionStr]`。自己尚未取得視訊來源時會忽略別人的 `join`（自己 `join` 時會收到完整 `userList`）。`connectionStr` 是雙方 username 排序後以 `<->` 串接，兩端算出來的值相同，作為連線的共同識別碼，同時也是遠端 `<video>` 元素的 `id`。
 3. 只有**剛加入者本人**（`json.username==username`）收到自己的 `join` 回播時，才對所有 peer 發出 offer；既有成員只建立 peer 並等待 offer。
-4. `offer` → `answer` → `ice_candidate` 皆帶 `connectionStr`，不屬於自己的連線（`peerList` 中找不到）會被忽略。
+4. `offer` → `answer` → `ice_candidate` 皆帶 `connectionStr`，不屬於自己的連線（`peerList` 中找不到）會被忽略。ICE candidate 若早於 remote description 到達，會先暫存，設定完成後再加入。
 5. `disconnect`：對應 peer 呼叫 `close()` 後刪除，並移除該 `<video>`。
 
 ### 注意事項
