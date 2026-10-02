@@ -19,7 +19,7 @@ app.use(express.static("public"));
 const server=https.createServer(options);
 server.listen(port,()=>
 {
-    console.log(`Listening at http://localhost:${port}`);
+    console.log(`Listening at https://localhost:${port}`);
 })
 server.on('request',app);
 
@@ -39,7 +39,8 @@ wss.on('connection',(ws,req)=>{
     let userName;
     ws.on("message",(data)=>
     {
-        myjson=JSON.parse(data);
+        data=data.toString(); //ws 8 以上收到的是 Buffer，轉回字串才會以文字格式轉發
+        let myjson=JSON.parse(data);
         if(myjson.type=="join")
         {
             let username=myjson.username;
